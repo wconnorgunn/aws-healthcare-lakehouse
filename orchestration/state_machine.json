@@ -1,0 +1,289 @@
+{
+  "Comment": "Healthcare Lakehouse - Phase 10.7 publisher execution ownership and query tracking (no automatic recovery)",
+  "StartAt": "ClaimBatch",
+  "States": {
+    "ClaimBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "CLAIM",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "ValidateBatch"
+    },
+    "ValidateBatch": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-quality-gate",
+        "Payload": {
+          "batch_name.$": "$.batch_name"
+        }
+      },
+      "ResultPath": "$.quality",
+      "Next": "CheckQuality",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "RecordFailed"
+        }
+      ]
+    },
+    "CheckQuality": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.quality.Payload.status",
+              "StringEquals": "PASS"
+            },
+            {
+              "Variable": "$.quality.Payload.batch_name",
+              "StringEquals": "encounter_batch_001"
+            }
+          ],
+          "Next": "RecordValidated"
+        }
+      ],
+      "Default": "RecordRejected"
+    },
+    "RecordValidated": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "VALIDATED"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "PublishSilver"
+    },
+    "PublishSilver": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-silver-publisher",
+        "Payload": {
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "ResultPath": "$.silver",
+      "Next": "CheckSilver",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "RecordFailed"
+        }
+      ]
+    },
+    "PublishGold": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-gold-publisher",
+        "Payload": {
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "ResultPath": "$.gold",
+      "Next": "CheckGold",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "RecordFailed"
+        }
+      ]
+    },
+    "Reconcile": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-reconciliation",
+        "Payload": {
+          "batch_name.$": "$.batch_name"
+        }
+      },
+      "ResultPath": "$.reconciliation",
+      "Next": "CheckReconciliation",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "RecordFailed"
+        }
+      ]
+    },
+    "CheckSilver": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.silver.Payload.status",
+              "StringEquals": "PUBLISHED"
+            },
+            {
+              "Variable": "$.silver.Payload.batch_name",
+              "StringEquals": "encounter_batch_001"
+            }
+          ],
+          "Next": "RecordSilverPublished"
+        }
+      ],
+      "Default": "RecordFailed"
+    },
+    "RecordSilverPublished": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "SILVER_PUBLISHED",
+          "merge_query_execution_id.$": "$.silver.Payload.merge_query_execution_id"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "PublishGold"
+    },
+    "CheckGold": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.gold.Payload.status",
+              "StringEquals": "PUBLISHED"
+            },
+            {
+              "Variable": "$.gold.Payload.batch_name",
+              "StringEquals": "encounter_batch_001"
+            }
+          ],
+          "Next": "RecordGoldPublished"
+        }
+      ],
+      "Default": "RecordFailed"
+    },
+    "RecordGoldPublished": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "GOLD_PUBLISHED",
+          "merge_query_execution_id.$": "$.gold.Payload.merge_query_execution_id"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "Reconcile"
+    },
+    "CheckReconciliation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.reconciliation.Payload.status",
+              "StringEquals": "PASS"
+            },
+            {
+              "Variable": "$.reconciliation.Payload.mismatched_patients",
+              "NumericEquals": 0
+            }
+          ],
+          "Next": "RecordCompleted"
+        }
+      ],
+      "Default": "RecordFailed"
+    },
+    "RecordCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "COMPLETED"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "BatchComplete"
+    },
+    "RecordFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "FAILED",
+          "failure_reason": "Publishing, reconciliation, or task execution failed; inspect Step Functions execution history"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "PublishingFailed"
+    },
+    "RecordRejected": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:us-east-1:123456789012:function:healthcare-lakehouse-batch-manager",
+        "Payload": {
+          "action": "UPDATE",
+          "batch_name.$": "$.batch_name",
+          "execution_arn.$": "$$.Execution.Id",
+          "status": "FAILED",
+          "failure_reason": "Staging batch failed data quality validation"
+        }
+      },
+      "ResultPath": "$.ledger",
+      "Next": "BatchRejected"
+    },
+    "BatchComplete": {
+      "Type": "Succeed"
+    },
+    "BatchRejected": {
+      "Type": "Fail",
+      "Error": "DataQualityFailed",
+      "Cause": "Staging batch failed data quality validation"
+    },
+    "PublishingFailed": {
+      "Type": "Fail",
+      "Error": "PublishingOrReconciliationFailed",
+      "Cause": "Publishing or reconciliation failed; inspect execution history"
+    }
+  }
+}
