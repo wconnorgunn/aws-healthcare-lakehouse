@@ -38,7 +38,7 @@ The counts are point-in-time measurements, not live counters.
 The deployed proof of concept used Step Functions, Lambda, DynamoDB, and CloudWatch. Quality-gate negative testing, successful orchestration, and assessment-only recovery tests were demonstrated. Automated recovery execution is **not** claimed.
 
 ## Scope of this repository
-Currently published files document the implemented architecture and provide **read-only SQL examples**. Complete deployed Lambda code, Step Functions JSON, and IAM configuration have not yet been verified and published here; do not interpret this repository as a deployable infrastructure-as-code solution.
+The repository now also includes **historical source snapshots** shared during the project build: [batch manager](src/lambda/batch_manager.py), [Silver publisher](src/lambda/silver_publisher.py), [Gold publisher](src/lambda/gold_publisher.py), and [Step Functions definition](orchestration/state_machine.json). AWS account IDs in these snapshots were replaced with placeholders. These files were not re-exported from AWS for this publication, so their correspondence to currently deployed versions and runtime behavior is not verified. The quality-gate and reconciliation Lambda sources are not included. Do not interpret this repository as a deployable infrastructure-as-code solution.
 
 ## Security
 Do not commit AWS secrets, access keys, real patient records, environment-specific credentials, or runtime logs with sensitive values.
