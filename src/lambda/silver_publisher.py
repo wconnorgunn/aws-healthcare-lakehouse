@@ -1,3 +1,7 @@
+"""Publish validated synthetic encounter batches into the Silver Iceberg layer.
+
+Runs Athena queries and coordinates batch status through the batch manager.
+An unresolved MERGE must be inspected before retrying because it may commit."""
 
 import boto3
 import hashlib
@@ -31,6 +35,7 @@ EXECUTION_ARN_PREFIX = (
 
 
 def batch_manager(payload):
+    """Invoke the batch manager synchronously and validate its response."""
     response = lambda_client.invoke(
         FunctionName=BATCH_MANAGER_FUNCTION,
         InvocationType="RequestResponse",
@@ -53,6 +58,7 @@ def batch_manager(payload):
 
 
 def wait_for_query(query_id, context, *, is_merge=False):
+    """Poll Athena while respecting Lambda time remaining; preserve unresolved MERGE IDs."""
     while context.get_remaining_time_in_millis() > 10000:
         execution = athena.get_query_execution(
             QueryExecutionId=query_id
@@ -87,6 +93,7 @@ def wait_for_query(query_id, context, *, is_merge=False):
 
 
 def run_query(sql, context):
+    """Submit an Athena query in the configured Silver workgroup."""
     response = athena.start_query_execution(
         QueryString=sql,
         QueryExecutionContext={
@@ -102,6 +109,7 @@ def run_query(sql, context):
 
 
 def get_scalar(query_id):
+    """Read a single scalar value from an Athena result."""
     response = athena.get_query_results(
         QueryExecutionId=query_id
     )
@@ -193,6 +201,7 @@ def publish_merge(
 
 
 def lambda_handler(event, context):
+    """Handle the lambda handler operation in this pipeline."""
     batch_name = event.get("batch_name")
     execution_arn = event.get("execution_arn")
 
