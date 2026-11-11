@@ -1,3 +1,8 @@
+"""Batch ingestion ledger and recovery-assessment operations.
+
+Coordinates DynamoDB state transitions, execution ownership, and Athena query
+inspection. Recovery checkpoint recommendations do not automatically replay data."""
+
 import os
 import re
 from datetime import datetime, timezone
@@ -36,19 +41,23 @@ CHECKPOINT_MAP = {
 
 
 def now_utc():
+    """Return an ISO-8601 UTC timestamp for ledger audit fields."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def get_batch(batch_name):
+    """Read the current ledger record using a consistent DynamoDB read."""
     response = table.get_item(Key={"batch_name": batch_name}, ConsistentRead=True)
     return response.get("Item")
 
 
 def conditional_failure(error):
+    """Identify a DynamoDB conditional-write conflict."""
     return error.response["Error"]["Code"] == "ConditionalCheckFailedException"
 
 
 def inspect_query(query_id):
+    """Inspect a previously registered Athena query and its execution status."""
     if not isinstance(query_id, str) or not QUERY_ID_PATTERN.fullmatch(query_id):
         raise ValueError("Invalid Athena query ID")
     query = athena.get_query_execution(QueryExecutionId=query_id)["QueryExecution"]
@@ -65,6 +74,7 @@ def inspect_query(query_id):
 
 
 def claim_batch(batch_name, execution_arn):
+    """Handle the claim batch operation in this pipeline."""
     if not execution_arn:
         raise ValueError("execution_arn is required")
     timestamp = now_utc()
@@ -91,6 +101,7 @@ def claim_batch(batch_name, execution_arn):
 
 
 def update_batch(batch_name, new_status, execution_arn, failure_reason=None, merge_query_execution_id=None):
+    """Handle the update batch operation in this pipeline."""
     if new_status not in VALID_STATUSES:
         raise ValueError("Invalid status")
     if not execution_arn:
@@ -167,6 +178,7 @@ def update_batch(batch_name, new_status, execution_arn, failure_reason=None, mer
 
 
 def record_query_started(batch_name, execution_arn, layer, query_id):
+    """Handle the record query started operation in this pipeline."""
     """Register a submitted MERGE without advancing the batch milestone."""
     if not isinstance(execution_arn, str) or not execution_arn.strip():
         raise ValueError("execution_arn is required")
@@ -231,6 +243,7 @@ def record_query_started(batch_name, execution_arn, layer, query_id):
 
 
 def check_recovery(batch_name):
+    """Handle the check recovery operation in this pipeline."""
     item = get_batch(batch_name)
     if not item:
         return {"batch_name": batch_name, "recovery_eligible": False, "decision": "NEW_BATCH", "reason": "Use normal batch claiming."}
@@ -279,6 +292,7 @@ def check_recovery(batch_name):
 
 
 def assess_recovery(batch_name):
+    """Handle the assess recovery operation in this pipeline."""
     """Read-only candidate checkpoint assessment. Never authorizes replay."""
     item = get_batch(batch_name)
     if not item:
@@ -347,6 +361,7 @@ def assess_recovery(batch_name):
 
 
 def lambda_handler(event, context):
+    """Handle the lambda handler operation in this pipeline."""
     action = event.get("action")
     batch_name = event.get("batch_name")
     if batch_name not in ALLOWED_BATCHES:
