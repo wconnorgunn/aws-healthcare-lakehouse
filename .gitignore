@@ -1,0 +1,15 @@
+# Never commit credentials, local environments, or downloaded datasets
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+.aws/
+*.pem
+*.key
+*.parquet
+data/
+raw/
+downloads/
+*.log
