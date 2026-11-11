@@ -1,3 +1,8 @@
+"""Publish the Gold patient-utilization analytics layer from curated data.
+
+Tracks Athena query outcomes and records publishing milestones through the
+batch manager. An unresolved MERGE is not assumed to have rolled back."""
+
 import boto3
 import hashlib
 import json
@@ -16,6 +21,7 @@ BATCH_MANAGER_FUNCTION = os.environ.get(
 
 
 def batch_manager(payload):
+    """Invoke the batch manager and reject failed or malformed responses."""
     response = lambda_client.invoke(
         FunctionName=BATCH_MANAGER_FUNCTION,
         InvocationType="RequestResponse",
@@ -30,6 +36,7 @@ def batch_manager(payload):
 
 
 def wait_for_query(query_id, context, *, is_merge=False):
+    """Wait for Athena completion without assuming an interrupted MERGE was rolled back."""
     while context.get_remaining_time_in_millis() > 10000:
         execution = athena.get_query_execution(QueryExecutionId=query_id)
         status = execution["QueryExecution"]["Status"]
@@ -53,6 +60,7 @@ def wait_for_query(query_id, context, *, is_merge=False):
 
 
 def run_query(sql, context):
+    """Run an Athena statement in the Gold database and workgroup."""
     response = athena.start_query_execution(
         QueryString=sql,
         QueryExecutionContext={"Database": DATABASE},
@@ -62,6 +70,7 @@ def run_query(sql, context):
 
 
 def get_scalar(query_id):
+    """Extract a scalar value from a completed Athena result."""
     response = athena.get_query_results(QueryExecutionId=query_id)
     rows = response["ResultSet"]["Rows"]
     if len(rows) != 2:
@@ -70,6 +79,7 @@ def get_scalar(query_id):
 
 
 def publish_merge(merge_sql, batch_name, execution_arn, context):
+    """Handle the publish merge operation in this pipeline."""
     # Deterministic for this exact execution and exact SQL. A retry with the same
     # parameters receives the original Athena QueryExecutionId, not a new MERGE.
     operation = json.dumps(
@@ -112,6 +122,7 @@ def publish_merge(merge_sql, batch_name, execution_arn, context):
 
 
 def lambda_handler(event, context):
+    """Handle the lambda handler operation in this pipeline."""
     batch_name = event.get("batch_name")
     execution_arn = event.get("execution_arn")
 
